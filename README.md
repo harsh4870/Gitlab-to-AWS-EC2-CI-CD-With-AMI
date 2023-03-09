@@ -5,3 +5,5 @@ Rolling update AWS EC2 AMI CI/CD deployment with Gitlab
 
 
 Build the AWS EC2 AMI and do the Rolling update deployment with Gitlab.
+
+Read Medium Article : https://medium.com/@harsh.manvar111/gitlab-to-aws-ec2-ami-rolling-update-ci-cd-cf31560e51d6
