@@ -1,0 +1,85 @@
+stages:
+  - deploy-test
+  - build-ami
+  - deploy
+  - terminate
+
+
+#Deploy changes to server directly with SSH in EC2
+Deploy Test:
+  stage: deploy-test
+  image: registry.gitlab.com/gitlab-org/cloud-deploy/aws-base:latest
+  only:
+   - development
+  before_script:
+    - apt-get update
+    - apt-get install -y ssh jq
+    - apt-get install awscli -y
+  script:
+    - cp $BASTION_SSH_KEY ./bastion-key
+    - chmod 600 bastion-key
+    - export DEV_SERVER_IP=$(aws ec2 describe-instances --filter "Name=instance-state-name,Values=running" "Name=tag:env,Values=dev-server" --query "Reservations[*].Instances[*].[PrivateIpAddress]" --output text)
+    - echo $DEV_SERVER_IP
+    - ssh -o "StrictHostKeyChecking no" -i bastion-key ec2-user@$BASTION_IP "ssh -i .ssh/dev-server.pem ec2-user@$DEV_SERVER_IP 'cd backend-node-services && ./buildprocess.sh'"
+
+
+Build AMI:
+  stage: build-ami
+  when: manual
+  image: registry.gitlab.com/gitlab-org/cloud-deploy/aws-base:latest
+  only:
+    - main
+    - development
+  artifacts:
+    paths:
+      - build/ami_id
+  before_script:
+    - apt-get update
+    - apt-get install -y ssh jq
+    - apt-get install awscli -y
+  script:
+    - mkdir -p build
+    # Sub in our variables
+    - cat launch-spec.json | jq ".ImageId=env.BUILD_IMAGE" | jq ".NetworkInterfaces[0].Groups=[env.BUILD_GROUP]" | jq ".NetworkInterfaces[0].SubnetId=env.SUBNET_ID" > build/launch-spec.json
+    # Make sure our script is executable
+    - chmod +x ./ami-creator.sh
+    # Make the AMI
+    - ./ami-creator.sh
+  after_script:
+    - aws ec2 terminate-instances --instance-ids `cat build/build_instance_id` || exit 0
+    - export AMI_ID=$(aws ec2 describe-images --owners self --filters "Name=name,Values=ami-$CI_COMMIT_BRANCH-$CI_COMMIT_SHORT_SHA" --query Images[0].ImageId --output text)
+    - echo AMI_ID=$AMI_ID
+
+Deploy:
+  stage: deploy
+  image: registry.gitlab.com/gitlab-org/cloud-deploy/aws-base:latest
+  when: manual
+  only:
+    - main
+    - development
+  dependencies:
+    - Build AMI
+  before_script:
+    - apt-get update
+    - apt-get install awscli -y
+  script:
+    - chmod +x ./deploy-ami.sh
+    - ./deploy-ami.sh
+
+Terminate:
+  stage: terminate
+  image: registry.gitlab.com/gitlab-org/cloud-deploy/aws-base:latest
+  when: manual
+  only:
+    - main
+    - development
+  dependencies:
+    - Deploy
+  before_script:
+    - apt-get update
+    - apt-get install awscli -y
+  script:
+    - if [ $CI_COMMIT_BRANCH == main ]; then export LAUNCH_TEMPLATE=$PROD_LAUNCH_TEMPLATE && export ASG_GROUP=$PROD_ASG_GROUP; else export LAUNCH_TEMPLATE=$TEST_LAUNCH_TEMPLATE && export ASG_GROUP=$TEST_ASG_GROUP; fi
+    - echo LAUNCH_TEMPLATE=$LAUNCH_TEMPLATE && echo BRANCH=$CI_COMMIT_BRANCH && echo ASG_GROUP=$ASG_GROUP
+    - echo "Terminating the older instances....!"
+    - aws autoscaling update-auto-scaling-group --auto-scaling-group-name $ASG_GROUP --desired-capacity 1
