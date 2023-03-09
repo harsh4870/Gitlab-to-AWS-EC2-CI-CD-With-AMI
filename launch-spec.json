@@ -1,0 +1,26 @@
+{
+  "ImageId": "ami-01f703c132f2b1a20",
+  "InstanceType": "t2.micro",
+  "BlockDeviceMappings": [
+    {
+      "DeviceName": "/dev/xvda",
+      "Ebs": {
+        "DeleteOnTermination": true,
+        "VolumeSize": 10,
+        "VolumeType": "gp3"
+      }
+    }
+  ],
+  "Monitoring": {
+    "Enabled": false
+  },
+  "NetworkInterfaces": [
+    {
+      "AssociatePublicIpAddress": true,
+      "DeleteOnTermination": true,
+      "DeviceIndex": 0,
+      "Groups": [ ],
+      "SubnetId": ""
+    }
+  ]
+}
